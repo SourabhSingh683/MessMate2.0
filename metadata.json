@@ -1,0 +1,6 @@
+{
+  "name": "MessMate 2.0",
+  "description": "Closed-loop college meal-subscription, mess-management, and kitchen intelligence platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
