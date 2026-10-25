@@ -20,10 +20,33 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   role: text('role').notNull().default('student'), // 'student' | 'owner' | 'admin'
+  passwordHash: text('password_hash'),
+  isEmailVerified: boolean('is_email_verified').default(false).notNull(),
   phone: text('phone'),
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const sessions = pgTable('sessions', {
+  id: serial('id').primaryKey(),
+  token: text('token').notNull().unique(),
+  userId: integer('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const emailVerifications = pgTable('email_verifications', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull(),
+  otpCode: text('otp_code').notNull(),
+  verificationToken: text('verification_token'),
+  purpose: text('purpose').default('registration').notNull(), // 'registration' | 'login' | 'reset'
+  expiresAt: timestamp('expires_at').notNull(),
+  verifiedAt: timestamp('verified_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const studentProfiles = pgTable('student_profiles', {
@@ -463,6 +486,14 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   credits: many(mealCreditLedger),
   feedbacks: many(feedbacks),
   notifications: many(notifications),
+  sessions: many(sessions),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
 }));
 
 export const messesRelations = relations(messes, ({ many }) => ({

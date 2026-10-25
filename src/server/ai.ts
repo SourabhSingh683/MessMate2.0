@@ -35,14 +35,18 @@ export async function matchMessesWithAI(preferences: {
 
   // Fallback deterministic ranking
   const fallbackRankings = targetMesses.map((m) => {
+    const price = Number(m.monthlyBasePricePaise || 340000);
+    const rating = Number(m.rating || 4.5);
     let score = 70;
-    if (dietaryPref === 'veg' && m.isPureVeg) score += 20;
-    if (m.monthlyBasePricePaise <= monthlyBudget * 100) score += 15;
-    score += (m.rating - 4.0) * 10;
+    if (dietaryPref === 'veg' && m.isPureVeg) score += 15;
+    if (price <= monthlyBudget * 100) score += 10;
+    score += Math.round((rating - 4.0) * 10);
+    const matchPercentage = Math.min(Math.max(isNaN(score) ? 75 : Math.round(score), 50), 98);
+
     return {
       messId: m.id,
-      matchPercentage: Math.min(Math.round(score), 98),
-      recommendationReason: `Well-aligned with your ${dietaryPref} preference and offers comprehensive meal plans within ₹${Math.round(m.monthlyBasePricePaise / 100)}/mo.`,
+      matchPercentage,
+      recommendationReason: `Well-aligned with your ${dietaryPref} preference and offers comprehensive meal plans within ₹${Math.round(price / 100)}/mo.`,
       highlightedPlans: m.plans?.map((p: any) => p.name) || [],
       nutritionFit: 'Standard balanced student diet with verified homestyle nutrition.',
     };

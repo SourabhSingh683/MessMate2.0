@@ -9,6 +9,7 @@ export interface User {
   phone?: string | null;
   avatarUrl?: string | null;
   messIds: number[];
+  isEmailVerified?: boolean;
 }
 
 export interface StudentProfile {

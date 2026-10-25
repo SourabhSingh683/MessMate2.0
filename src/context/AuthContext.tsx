@@ -15,6 +15,9 @@ interface AuthContextType {
   loading: boolean;
   isRealUser: boolean;
   login: (email: string, password?: string) => Promise<AuthResponse>;
+  loginWithOtp: (email: string, otpCode: string) => Promise<AuthResponse>;
+  sendOtp: (email: string, purpose?: 'registration' | 'login' | 'reset') => Promise<{ success: boolean; error?: string; message?: string }>;
+  verifyOtp: (email: string, otpCode: string, purpose?: string) => Promise<{ success: boolean; error?: string; verificationToken?: string }>;
   register: (data: any) => Promise<AuthResponse>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
@@ -132,6 +135,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const sendOtp = async (
+    email: string,
+    purpose: 'registration' | 'login' | 'reset' = 'registration'
+  ): Promise<{ success: boolean; error?: string; message?: string }> => {
+    try {
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, purpose }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to send verification code' };
+      }
+      return {
+        success: true,
+        message: data.message,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error sending verification code' };
+    }
+  };
+
+  const verifyOtp = async (
+    email: string,
+    otpCode: string,
+    purpose = 'registration'
+  ): Promise<{ success: boolean; error?: string; verificationToken?: string }> => {
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otpCode, purpose }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Invalid verification code' };
+      }
+      return {
+        success: true,
+        verificationToken: data.verificationToken,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error verifying code' };
+    }
+  };
+
+  const loginWithOtp = async (email: string, otpCode: string): Promise<AuthResponse> => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login-with-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otpCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to sign in' };
+      }
+      localStorage.setItem('messmate_session_token', data.token);
+      setSessionToken(data.token);
+      setUser(data.user);
+      setProfile(data.profile);
+      return {
+        success: true,
+        user: data.user,
+        profile: data.profile,
+        hasActiveSubscription: Boolean(data.hasActiveSubscription),
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Network error during sign in' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     setLoading(true);
     try {
@@ -165,6 +244,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isRealUser: Boolean(user),
         login,
+        loginWithOtp,
+        sendOtp,
+        verifyOtp,
         register,
         logout,
         refreshAuth,

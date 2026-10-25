@@ -26,6 +26,7 @@ import {
   auditLogs,
 } from './schema.ts';
 import { eq, sql } from 'drizzle-orm';
+import { hashPassword } from '../server/auth.ts';
 
 export async function seedDatabase(forceReset = false) {
   try {
@@ -66,7 +67,8 @@ export async function seedDatabase(forceReset = false) {
 
     console.log('Seeding MessMate 2.0 database with realistic college data...');
 
-    // 1. Users
+    // 1. Users with persistent password hashes ('password123')
+    const defaultPasswordHash = hashPassword('password123');
     const seededUsers = await db
       .insert(users)
       .values([
@@ -75,6 +77,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'aarav.sharma@campus.edu',
           name: 'Aarav Sharma',
           role: 'student',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98765 43210',
           avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150',
         },
@@ -83,6 +87,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'ananya.iyer@campus.edu',
           name: 'Ananya Iyer',
           role: 'student',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98765 43211',
           avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
         },
@@ -91,6 +97,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'rohan.verma@campus.edu',
           name: 'Rohan Verma',
           role: 'student',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98765 43212',
           avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
         },
@@ -99,6 +107,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'rajesh@annapurnarasoi.in',
           name: 'Rajesh Gupta',
           role: 'owner',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98111 22334',
           avatarUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
         },
@@ -107,6 +117,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'gurpreet@royalfeast.in',
           name: 'Gurpreet Singh',
           role: 'owner',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98222 33445',
           avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
         },
@@ -115,6 +127,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'vikram@campusbowl.in',
           name: 'Vikram Nair',
           role: 'owner',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98333 44556',
           avatarUrl: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150',
         },
@@ -123,6 +137,8 @@ export async function seedDatabase(forceReset = false) {
           email: 'admin.dean@campus.edu',
           name: 'Dr. Meenakshi Sundaram',
           role: 'admin',
+          passwordHash: defaultPasswordHash,
+          isEmailVerified: true,
           phone: '+91 98000 11223',
           avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150',
         },

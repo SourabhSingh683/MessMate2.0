@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { db } from '../db/index.ts';
-import { users, messMemberships } from '../db/schema.ts';
-import { eq } from 'drizzle-orm';
+import { users, sessions, messMemberships } from '../db/schema.ts';
+import { eq, and, gt } from 'drizzle-orm';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
 import crypto from 'crypto';
-import { prisma } from '../lib/prisma.ts';
+import { verifySupabaseJwt } from './supabaseAuth.ts';
 
 // Initialize Firebase Admin SDK safely
 if (!getApps().length && firebaseConfig?.projectId) {
@@ -21,9 +21,6 @@ if (!getApps().length && firebaseConfig?.projectId) {
 
 export const adminAuth = getApps().length ? getAuth() : null;
 
-// Re-export prisma singleton client for consumer modules
-export { prisma };
-
 export interface AuthenticatedUser {
   id: number;
   uid: string;
@@ -34,6 +31,7 @@ export interface AuthenticatedUser {
   avatarUrl?: string | null;
   messIds: number[];
   isDemo?: boolean;
+  isEmailVerified?: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -41,104 +39,147 @@ export interface AuthRequest extends Request {
   sessionToken?: string;
 }
 
-// In-memory token-to-user session store (supports real user session persistence)
-const sessionStore = new Map<string, { userId: number; expiresAt: number }>();
-
-// Real user credentials storage (salt:pbkdf2_hash)
-const userPasswords = new Map<string, string>();
-
-export function setStoredPassword(email: string, password: string) {
+/**
+ * Generates a persistent, salted PBKDF2 password hash with 100,000 iterations.
+ */
+export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  userPasswords.set(email.toLowerCase().trim(), `${salt}:${hash}`);
-}
-
-export function verifyStoredPassword(email: string, password?: string): boolean {
-  const normEmail = email.toLowerCase().trim();
-  // If not explicitly set (e.g. demo seed users), accept demo login
-  if (!userPasswords.has(normEmail)) {
-    return true;
-  }
-  if (!password) return false;
-  const stored = userPasswords.get(normEmail)!;
-  const [salt, hash] = stored.split(':');
-  const check = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
-  return check === hash;
-}
-
-export function createSession(userId: number): string {
-  const token = `mm_sess_${crypto.randomBytes(32).toString('hex')}`;
-  // Session valid for 7 days
-  sessionStore.set(token, {
-    userId,
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
-  });
-  return token;
-}
-
-export function invalidateSession(token: string) {
-  sessionStore.delete(token);
+  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
 }
 
 /**
- * Middleware: authenticates requests via either:
- * 1. Real user session token: `x-session-token` or `Authorization: Bearer mm_sess_...`
- * 2. Demo persona header: `x-demo-user-id` (for judges' quick test)
- * 3. Firebase Bearer token: verified with Firebase Admin
+ * Verifies a plain-text password against a stored salted hash using timing-safe comparison.
+ */
+export function verifyPassword(password: string, storedHash?: string | null): boolean {
+  if (!password || !storedHash || !storedHash.includes(':')) {
+    return false;
+  }
+  try {
+    const [salt, expectedHash] = storedHash.split(':');
+    const calculatedHash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+    const expectedBuf = Buffer.from(expectedHash, 'hex');
+    const calculatedBuf = Buffer.from(calculatedHash, 'hex');
+    if (expectedBuf.length !== calculatedBuf.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(expectedBuf, calculatedBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Creates a persistent database session valid for 7 days.
+ */
+export async function createSession(userId: number): Promise<string> {
+  const token = `mm_sess_${crypto.randomBytes(32).toString('hex')}`;
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await db.insert(sessions).values({
+    token,
+    userId,
+    expiresAt,
+  });
+
+  return token;
+}
+
+/**
+ * Invalidates a persistent session across server restarts.
+ */
+export async function invalidateSession(token: string): Promise<void> {
+  if (!token) return;
+  try {
+    await db.delete(sessions).where(eq(sessions.token, token));
+  } catch (err) {
+    console.error('Error invalidating session in database:', err);
+  }
+}
+
+/**
+ * Middleware: authenticates requests strictly via verified persistent sessions or Firebase.
+ * Unauthenticated header spoofing (x-demo-user-id) and default auto-login fallbacks are removed.
  */
 export async function authenticate(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const sessionTokenHeader = req.headers['x-session-token'] as string;
-    const demoUserId = req.headers['x-demo-user-id'] as string;
     const authHeader = req.headers.authorization;
 
     let matchedUser: any = null;
     let isDemoAccount = false;
-
-    // 1. Check Real User Session Token
     let token = sessionTokenHeader;
-    if (!token && authHeader && authHeader.startsWith('Bearer mm_sess_')) {
-      token = authHeader.split('Bearer ')[1];
-    }
 
-    if (token && sessionStore.has(token)) {
-      const sess = sessionStore.get(token)!;
-      if (Date.now() < sess.expiresAt) {
-        const uList = await db.select().from(users).where(eq(users.id, sess.userId)).limit(1);
-        if (uList.length > 0) {
-          matchedUser = uList[0];
-          req.sessionToken = token;
+    if (!token && authHeader) {
+      if (authHeader.startsWith('Bearer mm_sess_')) {
+        token = authHeader.slice(7);
+      } else if (authHeader.startsWith('Bearer ')) {
+        // Potential Firebase or raw token
+        const rawToken = authHeader.slice(7);
+        if (rawToken.startsWith('mm_sess_')) {
+          token = rawToken;
         }
-      } else {
-        sessionStore.delete(token);
       }
     }
 
-    // 2. Check Demo User identifier (for judges' rapid role switching)
-    if (!matchedUser && demoUserId) {
-      const isNum = !isNaN(Number(demoUserId));
-      const userList = await db
-        .select()
-        .from(users)
-        .where(isNum ? eq(users.id, Number(demoUserId)) : eq(users.uid, demoUserId))
+    // 1. Check Persistent Database Session
+    if (token) {
+      const activeSessions = await db
+        .select({
+          session: sessions,
+          user: users,
+        })
+        .from(sessions)
+        .innerJoin(users, eq(sessions.userId, users.id))
+        .where(and(eq(sessions.token, token), gt(sessions.expiresAt, new Date())))
         .limit(1);
 
-      if (userList.length > 0) {
-        matchedUser = userList[0];
-        isDemoAccount = true;
+      if (activeSessions.length > 0) {
+        matchedUser = activeSessions[0].user;
+        req.sessionToken = token;
+      }
+    }
+
+    // 2. Check Supabase Bearer Token if present
+    if (!matchedUser && authHeader && authHeader.startsWith('Bearer ') && !authHeader.includes('mm_sess_')) {
+      const rawToken = authHeader.slice(7);
+      try {
+        const sbUser = await verifySupabaseJwt(rawToken);
+        if (sbUser && sbUser.email) {
+          const cleanEmail = sbUser.email.toLowerCase().trim();
+          const existing = await db.select().from(users).where(eq(users.email, cleanEmail)).limit(1);
+          if (existing.length > 0) {
+            matchedUser = existing[0];
+          } else {
+            const [newUser] = await db
+              .insert(users)
+              .values({
+                uid: `sb_${sbUser.id}`,
+                email: cleanEmail,
+                name: sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || 'Campus Student',
+                role: 'student',
+                avatarUrl: sbUser.user_metadata?.avatar_url || null,
+                isEmailVerified: Boolean(sbUser.email_confirmed_at),
+              })
+              .returning();
+            matchedUser = newUser;
+          }
+        }
+      } catch (sbErr) {
+        // Fall through to Firebase or rejection
       }
     }
 
     // 3. Check Firebase Bearer Token if present (real Google sign-in)
-    if (!matchedUser && authHeader && authHeader.startsWith('Bearer ') && adminAuth) {
-      const fbToken = authHeader.split('Bearer ')[1];
+    if (!matchedUser && authHeader && authHeader.startsWith('Bearer ') && !authHeader.includes('mm_sess_') && adminAuth) {
+      const fbToken = authHeader.slice(7);
       try {
         const decoded = await adminAuth.verifyIdToken(fbToken);
         const existing = await db.select().from(users).where(eq(users.uid, decoded.uid)).limit(1);
         if (existing.length > 0) {
           matchedUser = existing[0];
         } else {
-          // Auto-provision real user on first Google login
+          // Provision verified Firebase student user
           const [newUser] = await db
             .insert(users)
             .values({
@@ -152,16 +193,7 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
           matchedUser = newUser;
         }
       } catch (tokenErr) {
-        // Fall through
-      }
-    }
-
-    // 4. Default fallback: only in development demo mode if no headers passed
-    if (!matchedUser && process.env.NODE_ENV !== 'production' && !req.path.startsWith('/auth/login') && !req.path.startsWith('/auth/register')) {
-      const defaultUser = await db.select().from(users).where(eq(users.uid, 'demo-student-1')).limit(1);
-      if (defaultUser.length > 0) {
-        matchedUser = defaultUser[0];
-        isDemoAccount = true;
+        // Token invalid, fall through
       }
     }
 
@@ -185,6 +217,7 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
       avatarUrl: matchedUser.avatarUrl,
       messIds: memberships.map((m) => m.messId),
       isDemo: isDemoAccount,
+      isEmailVerified: Boolean(matchedUser.isEmailVerified),
     };
 
     next();
@@ -210,26 +243,33 @@ export function requireRole(...roles: ('student' | 'owner' | 'admin')[]) {
 }
 
 /**
- * Middleware: requires owner to own/manage the specified messId in params or body
+ * Middleware: validates that the authenticated owner actually manages the specified mess
  */
 export function requireMessOwnership(req: AuthRequest, res: Response, next: NextFunction) {
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  // Admins have platform-wide access
   if (req.user.role === 'admin') {
     return next();
   }
 
+  if (req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'Forbidden: Owner role required' });
+  }
+
   const requestedMessId = Number(req.params.messId || req.body.messId || req.query.messId);
 
-  if (req.user.role === 'owner') {
-    if (requestedMessId && !req.user.messIds.includes(requestedMessId)) {
+  if (requestedMessId) {
+    if (!req.user.messIds.includes(requestedMessId)) {
       return res.status(403).json({ error: 'Forbidden: You do not have management access for this mess' });
     }
     return next();
   }
 
-  return res.status(403).json({ error: 'Forbidden: Owner role required' });
+  if (req.user.messIds.length === 0) {
+    return res.status(403).json({ error: 'Forbidden: No registered mess found under your owner account' });
+  }
+
+  next();
 }

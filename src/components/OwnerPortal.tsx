@@ -1454,46 +1454,103 @@ export const OwnerPortal: React.FC = () => {
       {/* TAB 6: OPERATIONAL ANALYTICS */}
       {activeTab === 'analytics' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Subscription Revenue</span>
-              <span className="text-2xl font-black text-slate-900">₹{analyticsData?.totalRevenueINR || 0}</span>
-              <span className="text-[10px] text-slate-500 block mt-1">Live payments total</span>
+              <span className="text-2xl font-black text-slate-900">₹{analyticsData?.totalRevenueINR ?? 0}</span>
+              <span className="text-[10px] font-bold text-emerald-700 block mt-1">● Actual (Recorded)</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Advance Skips Honored</span>
-              <span className="text-2xl font-black text-amber-800">{analyticsData?.totalAdvanceSkips || 0}</span>
-              <span className="text-[10px] text-slate-500 block mt-1">Meals not unnecessarily cooked</span>
+              <span className="text-2xl font-black text-amber-800">{analyticsData?.totalAdvanceSkips ?? 0}</span>
+              <span className="text-[10px] font-bold text-amber-700 block mt-1">● Actual (Ledger)</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">Food Waste Prevented</span>
-              <span className="text-2xl font-black text-emerald-800">{analyticsData?.foodWasteSavedKg || 0} kg</span>
-              <span className="text-[10px] text-slate-500 block mt-1">Raw vegetable/grain savings</span>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Food Avoided (Advance Skips)</span>
+              <span className="text-2xl font-black text-emerald-800">{analyticsData?.estimatedFoodAvoidedKg ?? 0} kg</span>
+              <span className="text-[10px] font-bold text-blue-700 block mt-1">● Estimated (Pre-prep)</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block">Mean Forecast Error</span>
-              <span className="text-2xl font-black text-teal-800">±{analyticsData?.meanAbsoluteForecastError || '2.1'}</span>
-              <span className="text-[10px] text-slate-500 block mt-1">Portions accuracy (MAE)</span>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Measured Kitchen Waste</span>
+              <span className="text-2xl font-black text-rose-800">{analyticsData?.measuredKitchenWasteKg ?? 0} kg</span>
+              <span className="text-[10px] font-bold text-rose-700 block mt-1">● Actual (Discard logs)</span>
             </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Forecast Error (MAE)</span>
+              <span className="text-lg font-black text-teal-800">
+                {analyticsData?.meanAbsoluteForecastError ? `±${analyticsData.meanAbsoluteForecastError} portions` : 'Not enough data yet'}
+              </span>
+              <span className="text-[10px] font-bold text-teal-700 block mt-1">● Forecast vs Actual</span>
+            </div>
+          </div>
+
+          {/* Attendance Trend (Actual vs Forecasted) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+            <h3 className="font-extrabold text-base text-slate-900">Recent Attendance: Forecast vs Actual Diners</h3>
+            {analyticsData?.attendanceTrends && analyticsData.attendanceTrends.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-bold">
+                      <th className="pb-2">Meal Slot</th>
+                      <th className="pb-2">Forecasted (Expected)</th>
+                      <th className="pb-2">Actual Diners</th>
+                      <th className="pb-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {analyticsData.attendanceTrends.map((t: any, i: number) => (
+                      <tr key={i} className="hover:bg-slate-50">
+                        <td className="py-2.5 font-bold text-slate-800">{t.date}</td>
+                        <td className="py-2.5 text-slate-600">{t.expected} (Forecast)</td>
+                        <td className="py-2.5 font-bold">
+                          {t.actual !== null && t.actual !== undefined ? (
+                            <span className="text-emerald-700">{t.actual} (Actual)</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal italic">Not recorded yet</span>
+                          )}
+                        </td>
+                        <td className="py-2.5">
+                          {t.actual !== null && t.actual !== undefined ? (
+                            <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px]">
+                              Reconciled ({t.actual >= t.expected ? `+${t.actual - t.expected}` : t.actual - t.expected})
+                            </span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px]">Pending</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic">Not enough data yet to show attendance trends.</p>
+            )}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
             <h3 className="font-extrabold text-base text-slate-900">Food Waste Breakdown by Primary Cause</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-              {analyticsData?.wasteBreakdown?.map((w: any, idx: number) => (
-                <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
-                  <div className="font-bold text-slate-800 capitalize">{w.reason.replace(/_/g, ' ')}</div>
-                  <div className="text-slate-500">
-                    Discarded: <strong className="text-rose-700">{w.discarded} portions</strong>
+              {analyticsData?.wasteBreakdown && analyticsData.wasteBreakdown.length > 0 ? (
+                analyticsData.wasteBreakdown.map((w: any, idx: number) => (
+                  <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
+                    <div className="font-bold text-slate-800 capitalize">{w.reason.replace(/_/g, ' ')}</div>
+                    <div className="text-slate-500">
+                      Discarded: <strong className="text-rose-700">{w.discarded} portions (Actual)</strong>
+                    </div>
+                    <div className="text-slate-500">
+                      Edible Leftovers: <strong className="text-amber-800">{w.leftovers} portions (Actual)</strong>
+                    </div>
                   </div>
-                  <div className="text-slate-500">
-                    Edible Leftovers: <strong className="text-amber-800">{w.leftovers} portions</strong>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-xs text-slate-400 italic col-span-3">Not enough data yet. Log kitchen production to view waste breakdown.</p>
+              )}
             </div>
           </div>
         </div>
