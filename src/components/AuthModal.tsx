@@ -216,6 +216,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setError(null);
   };
 
+  const handleQuickDemoLogin = async (demoEmail: string, demoRole: 'student' | 'owner') => {
+    setEmail(demoEmail);
+    setPassword('password123');
+    setRole(demoRole);
+    setMode('login');
+    setError(null);
+    setLoading(true);
+    const res = await login(demoEmail, 'password123');
+    setLoading(false);
+    if (res.success) {
+      onClose();
+      if (onSuccessRole && res.user) {
+        onSuccessRole(res.user.role as any);
+      }
+    } else {
+      setError(res.error || 'Demo login failed');
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
       <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-8">
@@ -320,20 +339,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* Quick Demo Credentials in Login Mode */}
           {mode === 'login' && !isRealUser && (
             <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-[11px]">
-              <span className="font-bold text-slate-700 block mb-1.5">Quick Demo Accounts:</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-bold text-slate-700">Quick Demo Accounts (1-Click Instant Login):</span>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => fillDemoAccount('aarav.sharma@campus.edu', 'student')}
-                  className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-medium hover:bg-emerald-100 transition cursor-pointer"
+                  disabled={loading}
+                  onClick={() => handleQuickDemoLogin('aarav.sharma@campus.edu', 'student')}
+                  className="px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-medium hover:bg-emerald-100 transition cursor-pointer flex items-center gap-1.5 text-xs shadow-xs"
                 >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   Student: aarav.sharma@campus.edu
                 </button>
                 <button
                   type="button"
-                  onClick={() => fillDemoAccount('rajesh@annapurnarasoi.in', 'owner')}
-                  className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg font-medium hover:bg-amber-100 transition cursor-pointer"
+                  disabled={loading}
+                  onClick={() => handleQuickDemoLogin('rajesh@annapurnarasoi.in', 'owner')}
+                  className="px-2.5 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg font-medium hover:bg-amber-100 transition cursor-pointer flex items-center gap-1.5 text-xs shadow-xs"
                 >
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                   Owner: rajesh@annapurnarasoi.in
                 </button>
               </div>
