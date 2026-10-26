@@ -19,7 +19,8 @@ interface AuthContextType {
   loginWithOtp: (email: string, otpCode: string) => Promise<AuthResponse>;
   sendOtp: (email: string, purpose?: 'registration' | 'login' | 'reset') => Promise<{ success: boolean; error?: string; message?: string }>;
   verifyOtp: (email: string, otpCode: string, purpose?: string) => Promise<{ success: boolean; error?: string; verificationToken?: string }>;
-  register: (data: any) => Promise<AuthResponse>;
+  register: (data: any) => Promise<AuthResponse & { emailConfirmationRequired?: boolean }>;
+  resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
@@ -146,8 +147,84 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const register = async (formData: any): Promise<AuthResponse> => {
+  const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    if (supabase) {
+      try {
+        const { error } = await supabase.auth.resend({
+          type: 'signup',
+          email: email.trim().toLowerCase(),
+        });
+        if (error) {
+          return { success: false, error: error.message };
+        }
+        return { success: true };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Failed to resend confirmation link' };
+      }
+    }
+    return { success: true };
+  };
+
+  const register = async (formData: any): Promise<AuthResponse & { emailConfirmationRequired?: boolean }> => {
     setLoading(true);
+    const cleanEmail = formData.email.trim().toLowerCase();
+
+    // 1. Prioritize Client-side Supabase Auth signUp with Magic Link confirmation
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name,
+              role: formData.role || 'student',
+              phone: formData.phone || null,
+            },
+            emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+          },
+        });
+
+        if (error) {
+          return { success: false, error: error.message };
+        }
+
+        // Email confirmation link required
+        if (data.user && !data.session) {
+          return {
+            success: true,
+            emailConfirmationRequired: true,
+          };
+        }
+
+        if (data.session && data.user) {
+          const userObj: User = {
+            id: Math.floor(Math.random() * 100000) + 100,
+            uid: data.user.id,
+            email: cleanEmail,
+            name: formData.name,
+            role: formData.role || 'student',
+            phone: formData.phone || null,
+            avatarUrl: null,
+            messIds: [],
+            isEmailVerified: true,
+          };
+          localStorage.setItem('messmate_session_token', data.session.access_token);
+          localStorage.setItem('messmate_user', JSON.stringify(userObj));
+          setSessionToken(data.session.access_token);
+          setUser(userObj);
+          return {
+            success: true,
+            user: userObj,
+            emailConfirmationRequired: false,
+          };
+        }
+      } catch (sbErr: any) {
+        console.warn('Supabase signUp error:', sbErr);
+      }
+    }
+
+    // 2. Fallback to /api/auth/register
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -174,38 +251,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
-      // If backend returned a specific error (e.g. email exists)
       if (!res.ok && data.error && res.status !== 404) {
         return { success: false, error: data.error };
       }
 
-      // If on static deployment (e.g. Vercel SPA) where /api is not deployed:
-      const registeredUser: User = {
-        id: Math.floor(Math.random() * 100000) + 100,
-        uid: `client_${Date.now()}`,
-        email: formData.email,
-        name: formData.name,
-        role: formData.role || 'student',
-        phone: formData.phone || null,
-        avatarUrl: null,
-        messIds: [],
-        isEmailVerified: true,
-      };
-
-      const fallbackToken = `mm_sess_verified_${Date.now()}`;
-      localStorage.setItem('messmate_session_token', fallbackToken);
-      localStorage.setItem('messmate_user', JSON.stringify(registeredUser));
-      setSessionToken(fallbackToken);
-      setUser(registeredUser);
-
       return {
         success: true,
-        user: registeredUser,
-        profile: null,
-        hasActiveSubscription: false,
+        emailConfirmationRequired: true,
       };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Network error during registration' };
+      return { success: false, error: err?.message || 'Network error during registration' };
     } finally {
       setLoading(false);
     }
@@ -439,6 +494,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendOtp,
         verifyOtp,
         register,
+        resendVerificationEmail,
         logout,
         refreshAuth,
         apiFetch,
